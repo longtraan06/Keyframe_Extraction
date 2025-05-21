@@ -25,7 +25,22 @@ class TransNetV2:
                 raise FileNotFoundError(f"[TransNetV2] ERROR: {model_dir} is not a directory.")
             else:
                 print(f"[TransNetV2] Using weights from {model_dir}.")
-
+        # Configure TensorFlow to limit GPU memory usage
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Limit TensorFlow to use only 30% of GPU memory
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    # Alternatively, set a memory limit:
+                    # tf.config.experimental.set_virtual_device_configuration(
+                    #     gpu,
+                    #     [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=24576)]  # 24GB
+                    # )
+                print("[TransNetV2] TensorFlow GPU memory growth enabled")
+            except RuntimeError as e:
+                print(f"[TransNetV2] Error setting GPU memory growth: {e}")
+                
         self._input_size = (27, 48, 3)
         try:
             self._model = tf.saved_model.load(model_dir)
