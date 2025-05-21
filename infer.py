@@ -113,29 +113,7 @@ class TransNetV2:
         ).run(capture_stdout=True, capture_stderr=True)
 
         video = np.frombuffer(video_stream, np.uint8).reshape([-1, 27, 48, 3])
-        
-        # Process in chunks to reduce memory usage
-        max_frames_per_chunk = 10000  # Adjust based on your memory constraints
-        
-        if len(video) > max_frames_per_chunk:
-            print(f"[TransNetV2] Processing video in chunks due to large size ({len(video)} frames)")
-            
-            chunks = [video[i:i+max_frames_per_chunk] for i in range(0, len(video), max_frames_per_chunk)]
-            single_frame_preds = []
-            all_frames_preds = []
-            
-            for i, chunk in enumerate(chunks):
-                print(f"[TransNetV2] Processing chunk {i+1}/{len(chunks)}")
-                single_pred, all_pred = self.predict_frames(chunk)
-                single_frame_preds.append(single_pred)
-                all_frames_preds.append(all_pred)
-            
-            single_frame_pred = np.concatenate(single_frame_preds)
-            all_frames_pred = np.concatenate(all_frames_preds)
-            
-            return video, single_frame_pred, all_frames_pred
-        else:
-            return (video, *self.predict_frames(video))
+        return (video, *self.predict_frames(video))
 
     @staticmethod
     def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5):
@@ -471,7 +449,7 @@ def main():
     parser = argparse.ArgumentParser(description="Extract keyframes from videos using LMSKE approach")
     parser.add_argument("video_path", type=str, help="Path to the video file")
     parser.add_argument("--output", type=str, default="keyframes", help="Output directory for keyframes")
-    parser.add_argument("--sample-rate", type=int, defaul, help="Sample every N frames to reduce computation")
+    parser.add_argument("--sample-rate", type=int, default = 5, help="Sample every N frames to reduce computation")
     parser.add_argument("--max-frames", type=int, default=50, help="Maximum number of frames to process per shot")
     args = parser.parse_args()
     
@@ -480,7 +458,7 @@ def main():
     
     # Initialize and run the keyframe extractor
     extractor = VideoKeyframeExtractor(
-        transnet_weights="/home/liex/Desktop/Work/keyframe_extraction/TransNetV2/inference/transnetv2-weights",
+        transnet_weights="transnetv2-weights",
         output_dir=args.output,
         sample_rate=args.sample_rate,
         max_frames_per_shot=args.max_frames
@@ -491,4 +469,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# python infer.py /root/NL/L01_V001.mp4 --output /root/NL/TransNetV2/inference/extracted_frames
+# python infer_SigLip.py /root/NL/L01_V001.mp4 --output /root/NL/extracted_frames
