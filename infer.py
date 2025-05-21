@@ -113,7 +113,29 @@ class TransNetV2:
         ).run(capture_stdout=True, capture_stderr=True)
 
         video = np.frombuffer(video_stream, np.uint8).reshape([-1, 27, 48, 3])
-        return (video, *self.predict_frames(video))
+        
+        # Process in chunks to reduce memory usage
+        max_frames_per_chunk = 10000  # Adjust based on your memory constraints
+        
+        if len(video) > max_frames_per_chunk:
+            print(f"[TransNetV2] Processing video in chunks due to large size ({len(video)} frames)")
+            
+            chunks = [video[i:i+max_frames_per_chunk] for i in range(0, len(video), max_frames_per_chunk)]
+            single_frame_preds = []
+            all_frames_preds = []
+            
+            for i, chunk in enumerate(chunks):
+                print(f"[TransNetV2] Processing chunk {i+1}/{len(chunks)}")
+                single_pred, all_pred = self.predict_frames(chunk)
+                single_frame_preds.append(single_pred)
+                all_frames_preds.append(all_pred)
+            
+            single_frame_pred = np.concatenate(single_frame_preds)
+            all_frames_pred = np.concatenate(all_frames_preds)
+            
+            return video, single_frame_pred, all_frames_pred
+        else:
+            return (video, *self.predict_frames(video))
 
     @staticmethod
     def predictions_to_scenes(predictions: np.ndarray, threshold: float = 0.5):
