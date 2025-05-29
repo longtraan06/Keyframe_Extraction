@@ -10,8 +10,9 @@ from sklearn.metrics import silhouette_score
 import argparse
 from PIL import Image
 import shutil
+import json
 from typing import List, Tuple
-
+import OCR_RAMRAM
 class TransNetV2:
     """
     TransNetV2 model for shot boundary detection.
@@ -164,6 +165,21 @@ class VideoKeyframeExtractor:
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
     
+    def get_video_fps(self, video_path: str) -> float:
+        """
+        Get video FPS to calculate timestamps.
+        
+        Args:
+            video_path: Path to the video file
+            
+        Returns:
+            FPS of the video
+        """
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        return fps
+    
     def extract_video_frames(self, video_path: str) -> Tuple[List[np.ndarray], List[int]]:
         """
         Extract frames from a video at the specified sample rate.
@@ -305,7 +321,7 @@ class VideoKeyframeExtractor:
         
         # Iteratively remove redundant frames
         to_keep = list(range(n_keyframes))
-        threshold = 0.8  # Similarity threshold
+        threshold = 0.92  # Similarity threshold
         
         i = 0
         while i < len(to_keep):
@@ -335,7 +351,16 @@ class VideoKeyframeExtractor:
             shutil.rmtree(video_output_dir)
         os.makedirs(video_output_dir)
         
+        # Move video to the output directory
+        video_filename = os.path.basename(video_path)
+        new_video_path = os.path.join(video_output_dir, video_filename)
+        shutil.move(video_path, new_video_path)
+        print(f"[KeyframeExtractor] Video copied to {new_video_path}")
+        video_path = new_video_path
         print(f"[KeyframeExtractor] Processing {video_path}")
+        
+        # Get video FPS for timestamp calculation
+        fps = self.get_video_fps(video_path)
         
         # Step 1: Run TransNetV2 to get shot boundaries
         _, single_frame_predictions, _ = self.transnet.predict_video(video_path)
@@ -345,6 +370,8 @@ class VideoKeyframeExtractor:
         
         # Step 2: Process each shot to extract keyframes
         all_keyframes = []
+        metadata = {video_name: {}}
+        frame_counter = 1
         
         # Extract all frames at the sample rate
         print("[KeyframeExtractor] Extracting frames from video")
@@ -382,20 +409,50 @@ class VideoKeyframeExtractor:
             # Map back to original frame indices
             shot_keyframe_indices = [shot_frame_indices[i] for i in keyframe_indices]
             
+            ocr_model, tokenizer = OCR_RAMRAM.load_model()
+
             # Save the keyframes
             for i, frame_idx in enumerate(shot_keyframe_indices):
                 original_frame_idx = all_frame_indices[frame_idx]
-                keyframe_path = os.path.join(
-                    video_output_dir, 
-                    f"shot_{shot_idx+1:03d}_keyframe_{i+1:02d}_frame_{original_frame_idx:05d}.jpg"
-                )
                 
-                # Save the image
-                Image.fromarray(all_frames[frame_idx]).save(keyframe_path)
+                # Generate frame filename
+                frame_filename = f"frame_{frame_counter:03d}.webp"
+                keyframe_path = os.path.join(video_output_dir, frame_filename)
+                
+                # Calculate timestamp
+                timestamp_seconds = original_frame_idx / fps
+                minutes = int(timestamp_seconds // 60)
+                seconds = timestamp_seconds % 60
+                timestamp = f"{minutes:02d}:{seconds:06.3f}"
+                
+                # Save the image in WebP format
+                image = Image.fromarray(all_frames[frame_idx])
+                image.save(keyframe_path, 'WEBP', quality=90)
+                # print(all_frames[frame_idx])
+                channel_name, main_news_text, thumbnail_text, time = OCR_RAMRAM.get_ocr(keyframe_path, ocr_model, tokenizer)
+                tags = OCR_RAMRAM.get_tag(keyframe_path, ocr_model, tokenizer)
+                # Add to metadata
+                metadata[video_name][f"frame_{frame_counter:03d}"] = {
+                    "time-stamp": timestamp,
+                    "shot": shot_idx + 1,
+                    "main_news_text": main_news_text,
+                    "thumbnail_text": thumbnail_text,
+                    "channel_name": channel_name,
+                    "real_life_time": time,
+                    "tags": tags
+                }
+                
                 all_keyframes.append((keyframe_path, shot_idx, i, original_frame_idx))
+                frame_counter += 1
         
         print(f"[KeyframeExtractor] Extracted {len(all_keyframes)} keyframes from {len(scenes)} shots")
         print(f"[KeyframeExtractor] Keyframes saved to {video_output_dir}")
+        
+        # Save metadata to JSON file
+        metadata_path = os.path.join(self.output_dir, "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        print(f"[KeyframeExtractor] Metadata saved to {metadata_path}")
         
         # Create a summary file
         with open(os.path.join(video_output_dir, "keyframes_summary.txt"), "w") as f:
@@ -407,55 +464,14 @@ class VideoKeyframeExtractor:
                 filename = os.path.basename(keyframe_path)
                 f.write(f"{filename}: Shot {shot_idx+1}, Keyframe {keyframe_idx+1}, Original Frame {original_frame_idx}\n")
 
-
-def download_transnetv2_weights():
-    """
-    Download TransNetV2 weights if they don't exist.
-    """
-    weights_dir = os.path.join(os.path.dirname(__file__), "transnetv2-weights")
-    if os.path.exists(weights_dir):
-        print(f"[TransNetV2] Weights already exist at {weights_dir}")
-        return weights_dir
-        
-    print("[TransNetV2] Downloading weights...")
-    import urllib.request
-    import zipfile
-    
-    # Create the directory
-    os.makedirs(weights_dir, exist_ok=True)
-    
-    # Download the weights
-    url = "https://github.com/soCzech/TransNetV2/releases/download/v1.0/transnetv2-weights.zip"
-    zip_path = os.path.join(os.path.dirname(__file__), "transnetv2-weights.zip")
-    
-    try:
-        urllib.request.urlretrieve(url, zip_path)
-        
-        # Extract the weights
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(os.path.dirname(__file__))
-            
-        # Remove the zip file
-        os.remove(zip_path)
-        print(f"[TransNetV2] Weights downloaded and extracted to {weights_dir}")
-        return weights_dir
-    except Exception as e:
-        print(f"[TransNetV2] Error downloading weights: {e}")
-        print("[TransNetV2] Please download the weights manually from https://github.com/soCzech/TransNetV2/releases")
-        sys.exit(1)
-
-
 def main():
     parser = argparse.ArgumentParser(description="Extract keyframes from videos using LMSKE approach")
     parser.add_argument("video_path", type=str, help="Path to the video file")
     parser.add_argument("--output", type=str, default="keyframes", help="Output directory for keyframes")
     parser.add_argument("--sample-rate", type=int, default = 5, help="Sample every N frames to reduce computation")
-    parser.add_argument("--max-frames", type=int, default=50, help="Maximum number of frames to process per shot")
+    parser.add_argument("--max-frames", type=int, default=60, help="Maximum number of frames to process per shot")
     args = parser.parse_args()
-    
-    # Download TransNetV2 weights if necessary
-    # weights_dir = download_transnetv2_weights()
-    
+
     # Initialize and run the keyframe extractor
     extractor = VideoKeyframeExtractor(
         transnet_weights="transnetv2-weights",
@@ -469,4 +485,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# python infer_SigLip.py /root/NL/L01_V001.mp4 --output /root/NL/extracted_frames
+# python infer.py /root/Keyframe_Extraction/L01_V001.mp4 --output /root/Keyframe_Extraction/data
