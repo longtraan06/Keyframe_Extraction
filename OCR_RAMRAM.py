@@ -12,18 +12,22 @@ import json
 from ram.models import ram_plus
 from ram import inference_ram as inference, get_transform
 from PIL import Image
-def get_tag(image, tag_model_weights="/root/Keyframe_Extraction/weights/recognize-anything-plus-model/ram_plus_swin_large_14m.pth"):
+def load_tag_model(tag_model_weights="recognize-anything-plus-model/ram_plus_swin_large_14m.pth"):
+    tag_model = ram_plus(
+        pretrained=tag_model_weights,
+        image_size=384,
+        vit='swin_l',
+    )
+    return tag_model
+
+def get_tag(image, tag_model):
     """
     Get tags from the image using the tag model
 
     Args:
         image: Path to the image file
     """
-    tag_model = ram_plus(
-        pretrained=tag_model_weights,
-        image_size=384,
-        vit='swin_l',
-    )
+    print("taging ......")
     tag_model.eval()
     transform = get_transform(image_size=384)
     tag_model = tag_model.to("cuda")
@@ -107,7 +111,7 @@ def load_image(image_file, input_size=448, max_num=12):
     pixel_values = torch.stack(pixel_values)
     return pixel_values
 
-def load_mode(model_name="OpenGVLab/InternVL3-38B"):
+def load_model(model_name="OpenGVLab/InternVL3-2B"):
     ocr_model_path = model_name
     ocr_model = AutoModel.from_pretrained(ocr_model_path,
                                     torch_dtype=torch.bfloat16,
@@ -129,6 +133,7 @@ def get_ocr(image, ocr_model, tokenizer):
     Returns:
         channel_name (str), main_news_text (str), thumbnail_text (str), time (str)
     """
+    print("OCR.......")
     # Load and preprocess image
     pixel_values = load_image(image, max_num=12).to(torch.bfloat16).cuda()
 
@@ -172,7 +177,7 @@ Now extract the information from this image:
 
     # Generate response
     response = ocr_model.chat(tokenizer, pixel_values, question, generation_config)
-    print(f'User: {question}\nAssistant: {response}')
+    print(f'Assistant: {response}')
 
     # Try parsing the response to extract the fields
     try:
@@ -190,5 +195,5 @@ Now extract the information from this image:
 
     return channel_name, main_news_text, thumbnail_text, time
 
-channel_name, main_news_text, thumbnail_text, time = get_ocr("/root/Keyframe_Extraction/data/L01_V001/frame_010.webp")
-print(channel_name, main_news_text, thumbnail_text, time, end = "\n")
+# channel_name, main_news_text, thumbnail_text, time = get_ocr("/root/Keyframe_Extraction/data/L01_V001/frame_010.webp")
+# print(channel_name, main_news_text, thumbnail_text, time, end = "\n")

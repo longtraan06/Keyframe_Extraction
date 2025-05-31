@@ -12,7 +12,9 @@ from PIL import Image
 import shutil
 import json
 from typing import List, Tuple
-import OCR_RAMRAM
+import RAM
+import easyocr
+import re
 class TransNetV2:
     """
     TransNetV2 model for shot boundary detection.
@@ -343,6 +345,11 @@ class VideoKeyframeExtractor:
         Args:
             video_path: Path to the video file
         """
+        # load model
+        # ocr_model, tokenizer = RAM.load_model()
+        tag_model = RAM.load_tag_model()
+        reader = easyocr.Reader(['vi','en'])
+        
         # Create directory for this video's keyframes
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         video_output_dir = os.path.join(self.output_dir, video_name)
@@ -360,19 +367,20 @@ class VideoKeyframeExtractor:
         print(f"[KeyframeExtractor] Processing {video_path}")
         
         # Get video FPS for timestamp calculation
+        print("Get video FPS for timestamp calculation")
         fps = self.get_video_fps(video_path)
-        
+        print("TransNetV2 runing")
         # Step 1: Run TransNetV2 to get shot boundaries
         _, single_frame_predictions, _ = self.transnet.predict_video(video_path)
         scenes = self.transnet.predictions_to_scenes(single_frame_predictions)
         
         print(f"[KeyframeExtractor] Detected {len(scenes)} shots in the video")
-        
+        print("Process each shot to extract keyframes")
         # Step 2: Process each shot to extract keyframes
         all_keyframes = []
         metadata = {video_name: {}}
         frame_counter = 1
-        
+        print("Extract all frames at the sample rate")
         # Extract all frames at the sample rate
         print("[KeyframeExtractor] Extracting frames from video")
         all_frames, all_frame_indices = self.extract_video_frames(video_path)
@@ -409,7 +417,7 @@ class VideoKeyframeExtractor:
             # Map back to original frame indices
             shot_keyframe_indices = [shot_frame_indices[i] for i in keyframe_indices]
             
-            ocr_model, tokenizer = OCR_RAMRAM.load_model()
+            
 
             # Save the keyframes
             for i, frame_idx in enumerate(shot_keyframe_indices):
@@ -429,17 +437,19 @@ class VideoKeyframeExtractor:
                 image = Image.fromarray(all_frames[frame_idx])
                 image.save(keyframe_path, 'WEBP', quality=90)
                 # print(all_frames[frame_idx])
-                channel_name, main_news_text, thumbnail_text, time = OCR_RAMRAM.get_ocr(keyframe_path, ocr_model, tokenizer)
-                tags = OCR_RAMRAM.get_tag(keyframe_path, ocr_model, tokenizer)
+                # channel_name, main_news_text, thumbnail_text, time = RAM.get_ocr(keyframe_path, ocr_model, tokenizer)
+                result = reader.readtext(keyframe_path, detail = 0)
+                OCR_cleaned = ' '.join(line.strip() for line in result)
+                OCR_cleaned = re.sub(r'\s([?.!,:;])', r'\1', result)
+                OCR_cleaned = re.sub(r'\s+', ' ', result).strip()
+
+                tags = RAM.get_tag(keyframe_path, tag_model)
                 # Add to metadata
                 metadata[video_name][f"frame_{frame_counter:03d}"] = {
                     "time-stamp": timestamp,
                     "shot": shot_idx + 1,
-                    "main_news_text": main_news_text,
-                    "thumbnail_text": thumbnail_text,
-                    "channel_name": channel_name,
-                    "real_life_time": time,
-                    "tags": tags
+                    "tags": tags,
+                    "orc": OCR_cleaned
                 }
                 
                 all_keyframes.append((keyframe_path, shot_idx, i, original_frame_idx))
@@ -469,7 +479,7 @@ def main():
     parser.add_argument("video_path", type=str, help="Path to the video file")
     parser.add_argument("--output", type=str, default="keyframes", help="Output directory for keyframes")
     parser.add_argument("--sample-rate", type=int, default = 5, help="Sample every N frames to reduce computation")
-    parser.add_argument("--max-frames", type=int, default=60, help="Maximum number of frames to process per shot")
+    parser.add_argument("--max-frames", type=int, default=55, help="Maximum number of frames to process per shot")
     args = parser.parse_args()
 
     # Initialize and run the keyframe extractor
@@ -485,4 +495,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# python infer.py /root/Keyframe_Extraction/L01_V001.mp4 --output /root/Keyframe_Extraction/data
+# python infer.py /root/NL/Keyframe_Extraction/L01_V001.mp4 --output /root/NL/Keyframe_Extraction/data
